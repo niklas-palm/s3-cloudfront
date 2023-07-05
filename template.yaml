@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  s3 bucket fronted with a cloudfront distrubution
+
+Resources:
+  # Bucket to host static assets
+  HostingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      Tags:
+        - Key: project
+          Value: data-share
+
+  # Identity to allow cloudFront to access our private bucket.
+  CloudFrontOriginAccessIdentity:
+    Type: "AWS::CloudFront::CloudFrontOriginAccessIdentity"
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Ref HostingBucket
+
+  # Bucket policy that allows the aboe OAI to access the buvket.
+  HostingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref HostingBucket
+      PolicyDocument:
+        Statement:
+          - Action:
+              - s3:GetObject
+            Effect: Allow
+            Resource:
+              - !Join
+                - ""
+                - - "arn:aws:s3:::"
+                  - !Ref HostingBucket
+                  - "/*"
+            Principal:
+              AWS: !Join
+                - ""
+                - - "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity "
+                  - !Ref CloudFrontOriginAccessIdentity
+
+  # CDN to front and cache content
+  CloudfrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        DefaultCacheBehavior:
+          AllowedMethods: # Which methods to forward to S3
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods: # Which methods to cache responses for at cloudfront
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+          DefaultTTL: 60 # in seconds
+          MaxTTL: 240 # in seconds
+          MinTTL: 60 # in seconds
+          ViewerProtocolPolicy: redirect-to-https
+          ForwardedValues:
+            Cookies:
+              Forward: none
+            QueryString: false
+          TargetOriginId: s3origin
+        Enabled: true
+        HttpVersion: http2
+        PriceClass: PriceClass_All
+        Origins:
+          - DomainName: !GetAtt HostingBucket.RegionalDomainName
+            Id: s3origin
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}
+        IPV6Enabled: false
+      Tags:
+        - Key: project
+          Value: data-share
+
+Outputs:
+  S3BucketName:
+    Value: !Ref HostingBucket
+  CloudfrontDistributionDomain:
+    Value: !GetAtt CloudfrontDistribution.DomainName
